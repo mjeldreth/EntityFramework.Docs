@@ -275,3 +275,90 @@ public static class ExecuteDeleteSample
         Console.WriteLine();
     }
 }
+
+public class TphBlogsContext : BlogsContext
+{
+    public TphBlogsContext()
+        : base(useSqlite: false)
+    {
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Post>().Ignore(e => e.Metadata);
+
+        // https://github.com/dotnet/efcore/issues/28671
+        // modelBuilder.Entity<Author>().OwnsOne(e => e.Contact).OwnsOne(e => e.Address);
+        modelBuilder.Entity<Author>().Ignore(e => e.Contact);
+
+        base.OnModelCreating(modelBuilder);
+    }
+
+    public override MappingStrategy MappingStrategy => MappingStrategy.Tph;
+}
+
+public class TphSqliteBlogsContext : BlogsContext
+{
+    public TphSqliteBlogsContext()
+        : base(useSqlite: true)
+    {
+    }
+
+    public override MappingStrategy MappingStrategy => MappingStrategy.Tph;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Post>().Ignore(e => e.Metadata);
+
+        // https://github.com/dotnet/efcore/issues/28671
+        // modelBuilder.Entity<Author>().OwnsOne(e => e.Contact).OwnsOne(e => e.Address);
+        modelBuilder.Entity<Author>().Ignore(e => e.Contact);
+
+        base.OnModelCreating(modelBuilder);
+    }
+}
+
+public class TptBlogsContext : BlogsContext
+{
+    public TptBlogsContext()
+        : base(useSqlite: false)
+    {
+    }
+
+    public override MappingStrategy MappingStrategy => MappingStrategy.Tpt;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FeaturedPost>().ToTable("FeaturedPosts");
+        modelBuilder.Entity<Post>().Ignore(e => e.Metadata);
+
+        // https://github.com/dotnet/efcore/issues/28671
+        // modelBuilder.Entity<Author>().OwnsOne(e => e.Contact).OwnsOne(e => e.Address);
+        modelBuilder.Entity<Author>().Ignore(e => e.Contact);
+
+        base.OnModelCreating(modelBuilder);
+    }
+}
+
+public class TpcBlogsContext : BlogsContext
+{
+    public TpcBlogsContext()
+        : base(useSqlite: false)
+    {
+    }
+
+    public override MappingStrategy MappingStrategy => MappingStrategy.Tpc;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Post>().UseTpcMappingStrategy();
+        modelBuilder.Entity<FeaturedPost>().ToTable("FeaturedPosts");
+        modelBuilder.Entity<Post>().Ignore(e => e.Metadata);
+
+        // https://github.com/dotnet/efcore/issues/28671
+        // modelBuilder.Entity<Author>().OwnsOne(e => e.Contact).OwnsOne(e => e.Address);
+        modelBuilder.Entity<Author>().Ignore(e => e.Contact);
+
+        base.OnModelCreating(modelBuilder);
+    }
+}

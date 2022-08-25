@@ -2,7 +2,7 @@
 title: What's New in EF Core 7.0
 description: Overview of new features in EF Core 7.0
 author: ajcvickers
-ms.date: 08/12/2022
+ms.date: 08/24/2022
 uid: core/what-is-new/ef-core-7
 ---
 
@@ -763,3 +763,122 @@ In summary, TPC is a good mapping strategy to use when your code will mostly que
 That being said, TPH is usually fine for most applications, and is a good default for a wide range of scenarios, so don't add the complexity of TPC if you don't need it. Specifically, if your code will mostly query for entities of many types, such as writing queries against the base type, then lean towards TPH over TPC.
 
 Use TPT only if constrained to do so by external factors.
+
+## Model building conventions
+
+EF Core uses a metadata "model" to describe how the application's entity types are mapped to the underlying database. This model is built using a set of around 60 "conventions". This model built by conventions can then be customized using [mapping attributes (aka "data annotations")]() and calls to the [`DbModelBuilder` API in `OnModelCreating`]().
+
+Starting with EF7, applications can now remove or replace any of these conventions, as well as add new conventions. These conventions are a powerful way to control model building, but can be complex and hard to get right. In many case, the existing [pre-convention model configuration]() can be used instead to easily specify common configuration of properties and types.
+
+Changes to the conventions used are made by overriding the `Db.Context.ConfigureConventions` method.
+
+> [!TIP]
+> To find all built-in model building conventions, look for every class that implements the [`IConvention`]() interface.
+
+### Removing an existing convention
+
+Sometimes one of the built-in conventions is not appropriate for your application, in which case it can be removed. For example, it usually makes sense to create indexes for foreign key (FK) columns, and hence there is a built-in convention for this: `ForeignKeyIndexConvention`. For example, looking at the [model debug view]() for a `Post` type with relationships to `Blog` and `Author`, we can see two indexes are created--one for the `BlogId` FK, and the other for the `AuthorId` FK. 
+
+```text
+  EntityType: Post
+    Properties:
+      Id (int) Required PK AfterSave:Throw ValueGenerated.OnAdd
+      AuthorId (no field, int?) Shadow FK Index
+      BlogId (no field, int) Shadow Required FK Index
+    Navigations:
+      Author (Author) ToPrincipal Author Inverse: Posts
+      Blog (Blog) ToPrincipal Blog Inverse: Posts
+    Keys:
+      Id PK
+    Foreign keys:
+      Post {'AuthorId'} -> Author {'Id'} ToDependent: Posts ToPrincipal: Author ClientSetNull
+      Post {'BlogId'} -> Blog {'Id'} ToDependent: Posts ToPrincipal: Blog Cascade
+    Indexes:
+      AuthorId
+      BlogId
+```
+
+However, indexes have overhead, and, as [asked here](https://github.com/dotnet/efcore/issues/10855), sometimes it may not be appropriate to create them for all FK columns. To achieve this, the `ForeignKeyIndexConvention` can be removed when building the model:
+
+```csharp
+protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+{
+    configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
+}
+```
+
+Looking at the model for `Post` now, we see that the indexes on FKs have not been created:
+
+```text
+  EntityType: Post
+    Properties:
+      Id (int) Required PK AfterSave:Throw ValueGenerated.OnAdd
+      AuthorId (no field, int?) Shadow FK
+      BlogId (no field, int) Shadow Required FK
+    Navigations:
+      Author (Author) ToPrincipal Author Inverse: Posts
+      Blog (Blog) ToPrincipal Blog Inverse: Posts
+    Keys:
+      Id PK
+    Foreign keys:
+      Post {'AuthorId'} -> Author {'Id'} ToDependent: Posts ToPrincipal: Author ClientSetNull
+      Post {'BlogId'} -> Blog {'Id'} ToDependent: Posts ToPrincipal: Blog Cascade
+```
+
+But what if we want some of these indexes, but not others? Well, indexes can still be explicitly specified in the model, so we can create just the indexes we want, such as one for `BlogId`:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Post>(entityTypeBuilder => entityTypeBuilder.HasIndex("BlogId"));
+}
+```
+
+The model now contains the `BlogId` index, but not the `AuthorId` index:
+
+```text
+  EntityType: Post
+    Properties:
+      Id (int) Required PK AfterSave:Throw ValueGenerated.OnAdd
+      AuthorId (no field, int?) Shadow FK
+      BlogId (no field, int) Shadow Required FK Index
+    Navigations:
+      Author (Author) ToPrincipal Author Inverse: Posts
+      Blog (Blog) ToPrincipal Blog Inverse: Posts
+    Keys:
+      Id PK
+    Foreign keys:
+      Post {'AuthorId'} -> Author {'Id'} ToDependent: Posts ToPrincipal: Author ClientSetNull
+      Post {'BlogId'} -> Blog {'Id'} ToDependent: Posts ToPrincipal: Blog Cascade
+    Indexes:
+      BlogId
+```
+
+### Adding a new convention
+
+The [table-per-hierarchy inheritance mapping strategy]() requires a discriminator column which specifies which type is represented in any given row. By default, EF 
+
+We can create a new convention that will set the maximum size (i.e. string length) of any discriminator column, and also create a database index for that column. All conventions must implement the [IConvention]() interface, but they will also implement at least one more specific interface which determines when the convention will be run. In this case, the convention will implement the [`IEntityTypeBaseTypeChangedConvention`](), which means it will be triggered whenever the mapped inheritance hierarchy for an entity type is changed. This interface defines one method, `ProcessEntityTypeBaseTypeChanged`, which the convention will implement:   
+
+<!--
+public class DiscriminatorIndexConvention : IEntityTypeBaseTypeChangedConvention
+{
+    public void ProcessEntityTypeBaseTypeChanged(
+        IConventionEntityTypeBuilder entityTypeBuilder,
+        IConventionEntityType? newBaseType,
+        IConventionEntityType? oldBaseType,
+        IConventionContext<IConventionEntityType> context)
+    {
+        var discriminatorProperty = entityTypeBuilder.Metadata.FindDiscriminatorProperty();
+        if (discriminatorProperty != null)
+        {
+            discriminatorProperty.SetMaxLength(24);
+            discriminatorProperty.DeclaringEntityType.Builder
+                .HasIndex(new[] { discriminatorProperty }, "DiscriminatorIndex");
+        }
+    }
+}
+-->
+[!code-csharp[DiscriminatorIndexConvention](../../../../samples/core/Miscellaneous/NewInEFCore7/ModelBuildingConventionsSample.cs?name=DiscriminatorIndexConvention)]
+
+This convention looks up the discriminator property and, if there is one (the hierarchy might not be using TPH mapping), sets the max length of the property, and then defines an index for it.
